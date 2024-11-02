@@ -232,7 +232,7 @@ void update_noise(float z)
             float imountain = g * ss2(rmt, 0.35);
 
             /* gc = green color, bc = blue color, rc = red color */
-            float gc = g * 255;
+            float gc = 0;
             float bc = 0;
             // float rc = (mountainc[0] * imountain);
             float rc = 0;
@@ -252,6 +252,10 @@ void update_noise(float z)
             wb *= 1 - wd;
             /* add water color to the image */
             mix(rc, gc, bc, wr, wg, wb, w, &rc, &gc, &bc);
+
+            /* add land color to the image */
+            const uint8_t land[3] = { 0, 254, 48 };
+            mix(rc, gc, bc, land[0], land[1], land[2], g, &rc, &gc, &bc);
 
             // gc = (imountain * mountainc[1]) + ((1 - imountain) * gc);
             // bc = (imountain * mountainc[2]) + ((1 - imountain) * bc);
