@@ -1,15 +1,13 @@
-#include "SDL_events.h"
-#include "SDL_keycode.h"
-#include "SDL_scancode.h"
-#include "SDL_video.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <ctype.h>
 #include <SDL.h>
 #include "sdlstuff.h"
 #include "stb_perlin.h"
 #include "stb_image_write.h"
+#include "ffmpeg.h"
 
 state_t *state = NULL;
 
@@ -322,6 +320,9 @@ int frame(void)
 
     static int dont = 1;
     static float t = 0;
+    static float d = 1;
+    static int recording = 0;
+    static FFMPEG *ffmpeg = NULL;
     while(SDL_PollEvent(&ev)) {
         switch(ev.type) {
         case SDL_QUIT:
@@ -329,6 +330,23 @@ int frame(void)
             return EXIT_FAILURE;
             break;
         case SDL_KEYUP:
+            if(ev.key.keysym.sym == SDLK_p) {
+                if(!recording) {
+                    ffmpeg = ffmpeg_start_rendering(WIDTH, HEIGHT, 12);
+                    recording = 1;
+                    printf("Starting to record!\n");
+                } else {
+                    ffmpeg_end_rendering(ffmpeg);
+                    ffmpeg = NULL;
+                    recording = 0;
+                    printf("Stopped recording!\n");
+                }
+            }
+            if(ev.key.keysym.sym == SDLK_e) {
+                d = 1;
+            } else if(ev.key.keysym.sym == SDLK_r) {
+                d = -1;
+            }
             if(ev.key.keysym.sym == SDLK_x) {
                 state->quit = true;
                 return EXIT_FAILURE;
@@ -337,11 +355,11 @@ int frame(void)
             if(ev.key.keysym.sym == SDLK_SPACE) {
                 dont = 1;
                 SDL_HideWindow(state->window);
+                SDL_PumpEvents();
                 printf("What do you want to output the capture to: ");
                 char b[256] = { 0 };
                 fgets(b, 256, stdin);
                 for(int i = 0; i < 256; i++) {
-#include <ctype.h>
                     if(!isprint(b[i]))
                         b[i] = 0;
                     if(b[i] == '\r' || b[i] == '\n')
@@ -355,7 +373,9 @@ int frame(void)
                                state->stride);
                 setres(400, 300);
                 update_noise(t);
+
                 SDL_ShowWindow(state->window);
+                SDL_PumpEvents();
             } else {
                 if(ev.key.keysym.sym == SDLK_q)
                     dont = 0;
@@ -370,11 +390,17 @@ int frame(void)
     /* controls:
         q:       run
         w:     pause
+        e:  forwards
+        r: backwards
+        p:    record
         space:  save
     */
     if(!dont) {
-        t += 1. / 60.;
+        t += (d * 1.) / 60.;
         update_noise(t);
+        if(recording) {
+            ffmpeg_send_frame(ffmpeg, state->pixels, WIDTH, HEIGHT);
+        }
     }
 
     return EXIT_SUCCESS;
