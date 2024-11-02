@@ -8,27 +8,27 @@
 #include <SDL.h>
 
 typedef struct {
-	SDL_Window *window;
-	SDL_Renderer *renderer;
-	SDL_Texture *texture;
-	uint32_t *pixels;
-	size_t width, height, stride;
-	size_t window_width, window_height;
-	int seed;
-	int prev, current;
+    SDL_Window *window;
+    SDL_Renderer *renderer;
+    SDL_Texture *texture;
+    uint32_t *pixels;
+    size_t width, height, stride;
+    size_t window_width, window_height;
+    int seed;
+    int prev, current;
 
-	bool quit;
+    bool quit;
 } state_t;
 
 extern state_t *state;
 
 #define ASSERT(cond, msg, ...)                                               \
-	do {                                                                     \
-		if(!(cond)) {                                                        \
-			fprintf(stderr, "assert: " msg "\n" __VA_OPT__(, ) __VA_ARGS__); \
-			exit(EXIT_FAILURE);                                              \
-		}                                                                    \
-	} while(0);
+    do {                                                                     \
+        if(!(cond)) {                                                        \
+            fprintf(stderr, "assert: " msg "\n" __VA_OPT__(, ) __VA_ARGS__); \
+            exit(EXIT_FAILURE);                                              \
+        }                                                                    \
+    } while(0);
 
 void initsdl(void);
 void sdlrender(void);
