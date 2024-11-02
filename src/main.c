@@ -13,6 +13,9 @@
 
 state_t *state = NULL;
 
+#define WIDTH 400
+#define HEIGHT 300
+
 uint32_t stpx(int x, int y, uint32_t col)
 {
     state->pixels[x + y * state->width] = col;
@@ -38,8 +41,8 @@ void preinit(void)
 {
     state = calloc(1, sizeof(state_t));
     ASSERT(state, "failed to allocate state!");
-    state->width = 400;
-    state->height = 300;
+    state->width = WIDTH;
+    state->height = HEIGHT;
     state->window_width = 800;
     state->window_height = 600;
     state->prev = 0;
@@ -169,9 +172,21 @@ static inline float watercol(float x, float y, float z, int se)
     return (n + 1) / 2;
 }
 
+/* water depth noise */
+static inline float waterdepth(float x, float y, float z, int se)
+{
+    float n =
+        (stb_perlin_fbm_noise3(0.5 * x, 0.5 * y, 0.5 * z, 2.0, 0.5, 6, se) +
+         1) /
+        2;
+    float m =
+        (stb_perlin_turbulence_noise3(x, y, z, 2.0, 0.5, 4, se + 1) + 1) / 2;
+    return (n + m) / 2;
+}
+
 /* mix 2 colors */
-void mix(float a1, float b1, float c1, float a2, float b2, float c2, float t,
-         float *r, float *g, float *b)
+static inline void mix(float a1, float b1, float c1, float a2, float b2,
+                       float c2, float t, float *r, float *g, float *b)
 {
     *r = ((1 - t) * a1) + t * a2;
     *g = ((1 - t) * b1) + t * b2;
@@ -223,12 +238,18 @@ void update_noise(float z)
             float rc = 0;
             /* wr = water red, wg = water green, wb = water blue */
             float wr = 0, wg = 0, wb = 0;
+            float wd =
+                waterdepth(nx, ny, z, state->seed + 41) * 0.9; /* water depth */
+            wd *= wd;
 
             /* mix water colors based on water noise */
             mix(wr, wg, wb, water_col[0], water_col[1], water_col[2],
                 w * watercolv, &wr, &wg, &wb);
             mix(wr, wg, wb, watercol2[0], watercol2[1], watercol2[2],
                 w * (1 - watercolv), &wr, &wg, &wb);
+            wr *= 1 - wd;
+            wg *= 1 - wd;
+            wb *= 1 - wd;
             /* add water color to the image */
             mix(rc, gc, bc, wr, wg, wb, w, &rc, &gc, &bc);
 
