@@ -55,7 +55,7 @@ void postdeinit(void)
     free(state);
 }
 
-float noise_(float x, float y, float z, int se)
+static inline float noise_(float x, float y, float z, int se)
 {
     float n = stb_perlin_noise3_seed(x, y, z, 0, 0, 0, se);
     float np = stb_perlin_noise3_seed(x, y, z, 0, 0, 0, se + 1);
@@ -65,27 +65,25 @@ float noise_(float x, float y, float z, int se)
     float n3 = stb_perlin_ridge_noise3(x, y, z, 2.0, 1.0, 1.0, 6, se);
     float n4 = stb_perlin_fbm_noise3(x, y, z, 2.5, 0.5, 6, se);
     float m = n3 * n;
-    //return (n + n2 + m) / 3;
     float m0 = (2 * n) + n2 + m;
     float f0 = (m0 + m + n4) * np;
-    float f1 =
-        stb_perlin_turbulence_noise3(x, y, z, 2.0, 0.5, /*offset 1.2,*/ 6, se);
+    float f1 = stb_perlin_turbulence_noise3(x, y, z, 2.0, 0.5, 6, se);
     float f2 = stb_perlin_ridge_noise3(x, y, z, 2.0, 0.5, 1.4, 6, se);
     float f = (f1 + f2 + f0) / 8;
     return f;
 }
 
-float ss(float x, float n)
+static inline float ss(float x, float n)
 {
     return powf(M_E, -75 * (x - n) * (x - n));
 }
 
-float ss2g(float x)
+static inline float ss2g(float x)
 {
     return (tanhf(x) / 2) + .5;
 }
 
-float ss2(float x, float n)
+static inline float ss2(float x, float n)
 {
     return ss2g(10 * (x - n + 0.07));
 }
@@ -112,10 +110,14 @@ float noise(float x, float y, float z, int se)
     float w = (1 - n); /* mutliply by */
 
     float final = w * stb_perlin_fbm_noise3(x, y, z, 2.0, 0.5, 6, se + 7);
-    return ss2(ss2(final, 0.15) * noise_(x, y, z, se + 8), 0.25);
+    float soft = ss2(ss2(final, 0.15) * noise_(x, y, z, se + 8), 0.25);
+
+    float rough = (0.75 * soft +
+                   0.25 * stb_perlin_fbm_noise3(x, y, z, 2.0, 0.5, 6, se + 9));
+    return (soft + rough) / 2;
 }
 
-float mountain(float x, float y, float z, int se)
+static inline float mountain(float x, float y, float z, int se)
 {
     float m = stb_perlin_fbm_noise3(x, y, z, 2.0, 0.5, 6, se);
     return m;
@@ -147,12 +149,12 @@ void update_noise(float z)
             gc = (imountain * mountainc[1]) + ((1 - imountain) * gc);
             bc = (imountain * mountainc[2]) + ((1 - imountain) * bc);
 
-            float s = 1 - m;
+            float s = 1 - (m * m);
+            float as = (m * m);
 
-            rc = (m * rc) + (s * sea[0]);
-            gc = (m * gc) + (s * sea[1]);
-            bc = (m * bc) + (s * sea[2]);
-
+            rc = (as * rc) + (s * sea[0]);
+            gc = (as * gc) + (s * sea[1]);
+            bc = (as * bc) + (s * sea[2]);
             stpx_rgb(x, y, rc, gc, bc);
         }
     }
