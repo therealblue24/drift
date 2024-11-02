@@ -6,3 +6,4 @@ compile_commands.json
 bkp.c
 main.dSYM
 .cache
+.DS_Store
