@@ -3,10 +3,11 @@
 void initsdl()
 {
     SDL_Init(SDL_INIT_EVERYTHING);
-    state->window = SDL_CreateWindow(
-        "Drift", SDL_WINDOWPOS_CENTERED_DISPLAY(0),
-        SDL_WINDOWPOS_CENTERED_DISPLAY(0), state->width, state->height,
-        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+    state->window = SDL_CreateWindow("Drift", SDL_WINDOWPOS_CENTERED_DISPLAY(0),
+                                     SDL_WINDOWPOS_CENTERED_DISPLAY(0),
+                                     state->window_width, state->window_height,
+                                     SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE |
+                                         SDL_WINDOW_ALLOW_HIGHDPI);
     ASSERT(state->window, "failed to create SDL window!");
     state->renderer = SDL_CreateRenderer(state->window, -1,
                                          SDL_RENDERER_ACCELERATED |
@@ -22,11 +23,18 @@ void initsdl()
 
 void sdlrender()
 {
+    SDL_Rect aspect = { 0 };
+    SDL_GetRendererOutputSize(state->renderer, &aspect.w, &aspect.h);
+    int wi = aspect.w;
+    aspect.w = (aspect.h * 4) / 3;
+    aspect.x = (wi - aspect.w) / 2;
+    SDL_RenderClear(state->renderer);
+
     ASSERT(!SDL_UpdateTexture(state->texture, NULL, state->pixels,
                               state->stride),
            "failed to update SDL texture!: %s", SDL_GetError());
-    ASSERT(!SDL_RenderCopyEx(state->renderer, state->texture, NULL, NULL, 0, 0,
-                             SDL_FLIP_NONE),
+    ASSERT(!SDL_RenderCopyEx(state->renderer, state->texture, NULL, &aspect, 0,
+                             0, SDL_FLIP_NONE),
            "failed to copy SDL texture!");
     SDL_RenderPresent(state->renderer);
 }

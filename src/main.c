@@ -38,13 +38,23 @@ void preinit(void)
 {
     state = calloc(1, sizeof(state_t));
     ASSERT(state, "failed to allocate state!");
-    state->width = 800;
-    state->height = 600;
+    state->width = 400;
+    state->height = 300;
     state->window_width = 800;
     state->window_height = 600;
     state->prev = 0;
     state->current = 0;
 
+    state->stride = state->width * 4;
+    state->pixels = calloc(state->height, state->stride);
+    ASSERT(state->pixels, "failed to allocate pixels!");
+}
+
+void setres(size_t w, size_t h)
+{
+    state->width = w;
+    state->height = h;
+    free(state->pixels);
     state->stride = state->width * 4;
     state->pixels = calloc(state->height, state->stride);
     ASSERT(state->pixels, "failed to allocate pixels!");
@@ -312,8 +322,14 @@ int frame(void)
                     if(b[i] == '\r' || b[i] == '\n')
                         b[i] = 0;
                 }
+                setres(10, 10);
+                sdlrender();
+                setres(1280, 960);
+                update_noise(t);
                 stbi_write_png(b, state->width, state->height, 4, state->pixels,
                                state->stride);
+                setres(400, 300);
+                update_noise(t);
                 SDL_ShowWindow(state->window);
             } else {
                 if(ev.key.keysym.sym == SDLK_q)
@@ -332,7 +348,7 @@ int frame(void)
         space:  save
     */
     if(!dont) {
-        t += 1. / 45.;
+        t += 1. / 60.;
         update_noise(t);
     }
 
@@ -352,7 +368,7 @@ int main(int argc, char *argv[])
     float now = SDL_GetMS();
     float last_frame = -1.0f;
     while(!state->quit) {
-        if(now - last_frame > 1. / 45.) {
+        if(now - last_frame > 1. / 60.) {
             last_frame = now;
             if(frame()) {
                 fprintf(stderr, "ERROR: Failed to frame\n");
