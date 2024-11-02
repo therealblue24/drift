@@ -9,3 +9,5 @@ Q - Continue time
 W - Pause time
 
 \<space\> - Capture image
+
+X - Quit
