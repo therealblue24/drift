@@ -7,3 +7,5 @@ bkp.c
 main.dSYM
 .cache
 .DS_Store
+ignore
+*.mp4
