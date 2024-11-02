@@ -1,0 +1,8 @@
+bin
+*.o
+out.png
+.clang-format
+compile_commands.json
+bkp.c
+main.dSYM
+.cache
