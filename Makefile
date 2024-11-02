@@ -1,5 +1,5 @@
 CC = clang
-CFLAGS = -std=c23 -O2 -g $(shell sdl2-config --cflags)
+CFLAGS = -std=c23 -O3 -march=native -mtune=native -g $(shell sdl2-config --cflags)
 LDFLAGS = $(shell sdl2-config --static-libs)
 SRC = $(wildcard src/**/*.c) $(wildcard src/*.c) $(wildcard src/**/**/*.c) $(wildcard src/**/**/**/*.c)
 OBJ = $(SRC:.c=.o)

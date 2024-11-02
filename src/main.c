@@ -1,6 +1,7 @@
 #include "SDL_events.h"
 #include "SDL_keycode.h"
 #include "SDL_scancode.h"
+#include "SDL_video.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -112,8 +113,8 @@ float noise(float x, float y, float z, int se)
     float final = w * stb_perlin_fbm_noise3(x, y, z, 2.0, 0.5, 6, se + 7);
     float soft = ss2(ss2(final, 0.15) * noise_(x, y, z, se + 8), 0.25);
 
-    float rough = (0.75 * soft +
-                   0.25 * stb_perlin_fbm_noise3(x, y, z, 2.0, 0.5, 6, se + 9));
+    float rough = (0.4 * soft +
+                   0.6 * stb_perlin_fbm_noise3(x, y, z, 2.0, 0.5, 6, se + 9));
     return (soft + rough) / 2;
 }
 
@@ -121,6 +122,28 @@ static inline float mountain(float x, float y, float z, int se)
 {
     float m = stb_perlin_fbm_noise3(x, y, z, 2.0, 0.5, 6, se);
     return m;
+}
+
+static inline float snow(float x, float y, float z, int se)
+{
+    float m = stb_perlin_fbm_noise3(x, y, z, 2.0, 0.5, 2, se);
+    float n =
+        stb_perlin_turbulence_noise3(2 * x, 2 * y, 2 * z, 2.0, 0.5, 4, se + 1);
+    return m * m * n;
+}
+
+static inline float watercol(float x, float y, float z, int se)
+{
+    float n = stb_perlin_noise3_seed(1.2 * x, 1.2 * y, 4 * z, 0, 0, 0, se);
+    return (n + 1) / 2;
+}
+
+void mix(float a1, float b1, float c1, float a2, float b2, float c2, float t,
+         float *r, float *g, float *b)
+{
+    *r = ((1 - t) * a1) + t * a2;
+    *g = ((1 - t) * b1) + t * b2;
+    *b = ((1 - t) * c1) + t * c2;
 }
 
 void update_noise(float z)
@@ -139,23 +162,70 @@ void update_noise(float z)
             float w = ss2(1 - n, 0.7);
             float m = g + w;
             const uint8_t sea[3] = { 20, 245, 207 };
-            /*g /= m;
-			w /= m;*/
+            g /= m;
+            w /= m;
             const uint8_t mountainc[3] = { 80, 115, 89 };
-            float imountain = g * ss2(mountain(nx, ny, z, state->seed), 0.35);
-            float gc = g * 255;
-            float bc = w * 255;
-            float rc = (mountainc[0] * imountain);
-            gc = (imountain * mountainc[1]) + ((1 - imountain) * gc);
-            bc = (imountain * mountainc[2]) + ((1 - imountain) * bc);
+            const uint8_t water_col[3] = { 5, 97, 245 };
+            //const uint8_t watercol2[3] = { 13, 180, 222 };
+            const uint8_t watercol2[3] = { 21, 24, 176 };
+            float rmt = mountain(nx, ny, z, state->seed);
+            float watercolv = watercol(nx, ny, z, state->seed + 21);
+            float snowv = snow(nx, ny, z, state->seed + 1);
+            float imountain = g * ss2(rmt, 0.35);
 
-            float s = 1 - (m * m);
-            float as = (m * m);
+            float gc = g * 255;
+            float bc = 0;
+            // float rc = (mountainc[0] * imountain);
+            float rc = 0;
+            float wr = 0, wg = 0, wb = 0;
+
+            mix(wr, wg, wb, water_col[0], water_col[1], water_col[2],
+                w * watercolv, &wr, &wg, &wb);
+            mix(wr, wg, wb, watercol2[0], watercol2[1], watercol2[2],
+                w * (1 - watercolv), &wr, &wg, &wb);
+            mix(rc, gc, bc, wr, wg, wb, w, &rc, &gc, &bc);
+
+            // gc = (imountain * mountainc[1]) + ((1 - imountain) * gc);
+            // bc = (imountain * mountainc[2]) + ((1 - imountain) * bc);
+
+            mix(rc, gc, bc, mountainc[0], mountainc[1], mountainc[2], imountain,
+                &rc, &gc, &bc);
+            float s = 1 - (ss2(g * m, 0.5) + ss2(w * m, 0.5));
+            mix(rc, gc, bc, sea[0], sea[1], sea[2], s * 0.5, &rc, &gc, &bc);
+            mix(rc, gc, bc, 255, 255, 255, snowv * g, &rc, &gc, &bc);
+
+            /*
+            float s = 1 - (m);
+            float as = (m);
 
             rc = (as * rc) + (s * sea[0]);
             gc = (as * gc) + (s * sea[1]);
             bc = (as * bc) + (s * sea[2]);
+            */
             stpx_rgb(x, y, rc, gc, bc);
+            /*
+            n *= 100;
+            uint8_t rc = 0;
+            uint8_t gc = 0;
+            uint8_t bc = 0;
+            const uint8_t mountainc[3] = { 80, 115, 89 };
+            float imountain =
+                (n > 50) * ss2(mountain(nx, ny, z, state->seed), 0.35);
+            if(n > 50) {
+                rc = 0;
+                gc = n + 155;
+                bc = 0;
+            } else {
+                rc = 0;
+                gc = 0;
+                bc = n + 155;
+            }
+
+            rc = (1 - imountain) * rc + imountain * mountainc[0];
+            gc = (1 - imountain) * gc + imountain * mountainc[1];
+            bc = (1 - imountain) * bc + imountain * mountainc[2];
+            stpx_rgb(x, y, rc, gc, bc);
+            */
         }
     }
 }
@@ -180,10 +250,27 @@ int frame(void)
             return EXIT_FAILURE;
             break;
         case SDL_KEYUP:
+            if(ev.key.keysym.sym == SDLK_x) {
+                state->quit = true;
+                return EXIT_FAILURE;
+                break;
+            }
             if(ev.key.keysym.sym == SDLK_SPACE) {
                 dont = 1;
-                stbi_write_png("out.png", state->width, state->height, 4,
-                               state->pixels, state->stride);
+                SDL_HideWindow(state->window);
+                printf("What do you want to output the capture to: ");
+                char b[256] = { 0 };
+                fgets(b, 256, stdin);
+                for(int i = 0; i < 256; i++) {
+#include <ctype.h>
+                    if(!isprint(b[i]))
+                        b[i] = 0;
+                    if(b[i] == '\r' || b[i] == '\n')
+                        b[i] = 0;
+                }
+                stbi_write_png(b, state->width, state->height, 4, state->pixels,
+                               state->stride);
+                SDL_ShowWindow(state->window);
             } else {
                 if(ev.key.keysym.sym == SDLK_q)
                     dont = 0;
