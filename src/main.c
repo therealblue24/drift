@@ -218,7 +218,16 @@ void update_raw(float z)
     }
 }
 
-void update_noise(float z)
+float fclamp(float v, float l, float h)
+{
+    if(v < l)
+        v = l;
+    if(v > h)
+        v = h;
+    return v;
+}
+
+void update_noise(float z, int mode)
 {
     for(int x = 0; x < state->width; x++) {
         for(int y = 0; y < state->height; y++) {
@@ -240,72 +249,79 @@ void update_noise(float z)
              * w = water
              * m = mismatch factor
              */
-            float g = ss2(n, 0.7); // make land peak above 0.7
-            float w = ss2(1 - n, 0.7); // make water peak above 0.7 for (1-n)
-            float m = g + w;
-            g /= m; // fix land and water ratios
-            w /= m;
+            if(!mode) {
+                float g = ss2(n, 0.7); // make land peak above 0.7
+                float w =
+                    ss2(1 - n, 0.7); // make water peak above 0.7 for (1-n)
+                float rg = fclamp(n - 0.35, 0, 1);
+                float rw = fclamp((1 - n) - 0.35, 0, 1);
+                float rm = rg + rw;
+                //rg /= rm;
+                //rw /= rm;
+                float m = g + w;
+                g /= m; // fix land and water ratios
+                w /= m;
 
-            const uint8_t sea[3] = { 20, 245, 207 };
-            const uint8_t mountainc[3] = { 80, 115, 89 };
-            const uint8_t water_col[3] = { 5, 97, 245 };
-            //const uint8_t watercol2[3] = { 13, 180, 222 };
-            const uint8_t watercol2[3] = { 21, 24, 176 };
-            /* calculate mountain noise, water color noise, snow noise */
-            float rmt = mountain(nx, ny, z, state->seed);
-            float watercolv = watercol(nx, ny, z, state->seed + 21);
-            float snowv = snow(nx, ny, z, state->seed + 1);
-            /* make mountain noise peak at 0.35 and above, multiply by land factor */
-            float imountain = g * ss2(rmt, 0.35);
+                const uint8_t sea[3] = { 20, 245, 207 };
+                const uint8_t mountainc[3] = { 80, 115, 89 };
+                const uint8_t water_col[3] = { 5, 97, 245 };
+                //const uint8_t watercol2[3] = { 13, 180, 222 };
+                const uint8_t watercol2[3] = { 21, 24, 176 };
+                /* calculate mountain noise, water color noise, snow noise */
+                float rmt = mountain(nx, ny, z, state->seed);
+                float watercolv = watercol(nx, ny, z, state->seed + 21);
+                float snowv = snow(nx, ny, z, state->seed + 1);
+                /* make mountain noise peak at 0.35 and above, multiply by land factor */
+                float imountain = g * ss2(rmt, 0.35);
 
-            /* gc = green color, bc = blue color, rc = red color */
-            float gc = 0;
-            float bc = 0;
-            // float rc = (mountainc[0] * imountain);
-            float rc = 0;
-            /* wr = water red, wg = water green, wb = water blue */
-            float wr = 0, wg = 0, wb = 0;
-            float wd =
-                waterdepth(nx, ny, z, state->seed + 41) * 0.9; /* water depth */
-            wd *= wd;
+                /* gc = green color, bc = blue color, rc = red color */
+                float gc = 0;
+                float bc = 0;
+                // float rc = (mountainc[0] * imountain);
+                float rc = 0;
+                /* wr = water red, wg = water green, wb = water blue */
+                float wr = 0, wg = 0, wb = 0;
+                float wd = waterdepth(nx, ny, z, state->seed + 41) *
+                           0.9; /* water depth */
+                wd = ((0.25 * wd) + (0.75 * rw));
 
-            /* mix water colors based on water noise */
-            mix(wr, wg, wb, water_col[0], water_col[1], water_col[2],
-                w * watercolv, &wr, &wg, &wb);
-            mix(wr, wg, wb, watercol2[0], watercol2[1], watercol2[2],
-                w * (1 - watercolv), &wr, &wg, &wb);
-            wr *= 1 - wd;
-            wg *= 1 - wd;
-            wb *= 1 - wd;
-            /* add water color to the image */
-            mix(rc, gc, bc, wr, wg, wb, w, &rc, &gc, &bc);
+                /* mix water colors based on water noise */
+                mix(wr, wg, wb, water_col[0], water_col[1], water_col[2],
+                    w * watercolv, &wr, &wg, &wb);
+                mix(wr, wg, wb, watercol2[0], watercol2[1], watercol2[2],
+                    w * (1 - watercolv), &wr, &wg, &wb);
+                wr *= 1 - (wd * wd);
+                wg *= 1 - (wd * wd);
+                wb *= 1 - (wd * wd);
+                /* add water color to the image */
+                mix(rc, gc, bc, wr, wg, wb, w, &rc, &gc, &bc);
 
-            /* add land color to the image */
-            const uint8_t land[3] = { 0, 254, 48 };
-            const uint8_t desert[3] = { 230, 211, 126 };
-            float landcol[3] = { 0, 254, 48 };
-            float desertv = desertnoise(nx, ny, z, state->seed + 12345);
-            mix(landcol[0], landcol[1], landcol[2], desert[0], desert[1],
-                desert[2], desertv, &landcol[0], &landcol[1], &landcol[2]);
-            mix(rc, gc, bc, landcol[0], landcol[1], landcol[2], g, &rc, &gc,
-                &bc);
+                /* add land color to the image */
+                const uint8_t land[3] = { 0, 254, 48 };
+                const uint8_t desert[3] = { 230, 211, 126 };
+                float landcol[3] = { 0, 254, 48 };
+                float desertv = desertnoise(nx, ny, z, state->seed + 12345);
+                mix(landcol[0], landcol[1], landcol[2], desert[0], desert[1],
+                    desert[2], desertv, &landcol[0], &landcol[1], &landcol[2]);
+                mix(rc, gc, bc, landcol[0], landcol[1], landcol[2], g, &rc, &gc,
+                    &bc);
 
-            // gc = (imountain * mountainc[1]) + ((1 - imountain) * gc);
-            // bc = (imountain * mountainc[2]) + ((1 - imountain) * bc);
+                // gc = (imountain * mountainc[1]) + ((1 - imountain) * gc);
+                // bc = (imountain * mountainc[2]) + ((1 - imountain) * bc);
 
-            /* add mountain color to the image */
-            mix(rc, gc, bc, mountainc[0], mountainc[1], mountainc[2], imountain,
-                &rc, &gc, &bc);
-            /* add snow color to the image */
-            mix(rc, gc, bc, 255, 255, 255, snowv * g, &rc, &gc, &bc);
-            /* calculate sea/shoreline factor */
-            float s = 1 - (ss2(g * m, 0.5) +
-                           ss2(w * m, 0.5)); /* calculate sea amount */
+                /* add mountain color to the image */
+                mix(rc, gc, bc, mountainc[0], mountainc[1], mountainc[2],
+                    imountain, &rc, &gc, &bc);
+                /* add snow color to the image */
+                mix(rc, gc, bc, 255, 255, 255, snowv * g, &rc, &gc, &bc);
+                /* calculate sea/shoreline factor */
+                float s = 1 - (ss2(g * m, 0.5) +
+                               ss2(w * m, 0.5)); /* calculate sea amount */
 
-            /* mix sea/shoreline color to image */
-            mix(rc, gc, bc, sea[0], sea[1], sea[2], s * 0.5, &rc, &gc, &bc);
+                /* mix sea/shoreline color to image */
+                mix(rc, gc, bc, sea[0], sea[1], sea[2], s * 0.5, &rc, &gc, &bc);
 
-            /*
+                /*
             float s = 1 - (m);
             float as = (m);
 
@@ -313,8 +329,11 @@ void update_noise(float z)
             gc = (as * gc) + (s * sea[1]);
             bc = (as * bc) + (s * sea[2]);
             */
-            /* upload to image */
-            stpx_rgb(x, y, rc, gc, bc);
+                /* upload to image */
+                stpx_rgb(x, y, rc, gc, bc);
+            } else {
+                stpx_rgb(x, y, n * 255, n * 255, n * 255);
+            }
             /*
             n *= 100;
             uint8_t rc = 0;
@@ -345,7 +364,7 @@ void update_noise(float z)
 void init(void)
 {
     state->seed = rand();
-    update_noise(0.0); /* init noise at t=0 */
+    update_noise(0.0, 0); /* init noise at t=0 */
 }
 
 int frame(void)
@@ -359,6 +378,7 @@ int frame(void)
     static int recording = 0;
     static int moving = 0;
     static int didsmth = 0;
+    static int mode = 0;
     static FFMPEG *ffmpeg = NULL;
     while(SDL_PollEvent(&ev)) {
         switch(ev.type) {
@@ -393,6 +413,13 @@ int frame(void)
             return EXIT_FAILURE;
             break;
         case SDL_KEYUP:
+            if(ev.key.keysym.sym == SDLK_1) {
+                mode = 1;
+                didsmth = 1;
+            } else if(ev.key.keysym.sym == SDLK_2) {
+                mode = 0;
+                didsmth = 1;
+            }
             if(ev.key.keysym.sym == SDLK_p) {
                 if(!recording) {
                     ffmpeg = ffmpeg_start_rendering(WIDTH, HEIGHT, 12);
@@ -431,11 +458,11 @@ int frame(void)
                 setres(10, 10);
                 sdlrender();
                 setres(1280, 960);
-                update_noise(t);
+                update_noise(t, mode);
                 stbi_write_png(b, state->width, state->height, 4, state->pixels,
                                state->stride);
-                setres(400, 300);
-                update_noise(t);
+                setres(WIDTH, HEIGHT);
+                update_noise(t, mode);
 
                 SDL_ShowWindow(state->window);
                 SDL_PumpEvents();
@@ -461,13 +488,13 @@ int frame(void)
     if(!dont) {
         didsmth = 0;
         t += (d * 1.) / 60.;
-        update_noise(t);
+        update_noise(t, mode);
         if(recording) {
             ffmpeg_send_frame(ffmpeg, state->pixels, WIDTH, HEIGHT);
         }
     }
     if(didsmth)
-        update_noise(t);
+        update_noise(t, mode);
     didsmth = 0;
 
     return EXIT_SUCCESS;
