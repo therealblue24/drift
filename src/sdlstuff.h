@@ -12,6 +12,8 @@ typedef struct {
     SDL_Renderer *renderer;
     SDL_Texture *texture;
     uint32_t *pixels;
+    float offx, offy;
+    float zoom;
     size_t width, height, stride;
     size_t window_width, window_height;
     int seed;

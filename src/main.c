@@ -1,3 +1,4 @@
+#include "SDL_events.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -44,6 +45,8 @@ void preinit(void)
     state->window_width = 800;
     state->window_height = 600;
     state->prev = 0;
+    state->zoom = 1;
+    state->offx = state->offy = 0;
     state->current = 0;
 
     state->stride = state->width * 4;
@@ -182,6 +185,14 @@ static inline float waterdepth(float x, float y, float z, int se)
     return (n + m) / 2;
 }
 
+/* desert biome noise */
+static inline float desertnoise(float x, float y, float z, int se)
+{
+    float n0 = stb_perlin_noise3_seed(x, y, 2 * z, 0, 0, 0, se);
+    float n1 = stb_perlin_noise3_seed(x, y, 3 * z, 0, 0, 0, se + 1);
+    return ss2((n0 + 1) / 2, 0.6125);
+}
+
 /* mix 2 colors */
 static inline void mix(float a1, float b1, float c1, float a2, float b2,
                        float c2, float t, float *r, float *g, float *b)
@@ -191,15 +202,33 @@ static inline void mix(float a1, float b1, float c1, float a2, float b2,
     *b = ((1 - t) * c1) + t * c2;
 }
 
+void update_raw(float z)
+{
+    for(int x = 0; x < state->width; x++) {
+        for(int y = 0; y < state->height; y++) {
+            float nx = x / (float)state->width;
+            float ny = y / (float)state->height;
+            nx *= 2, ny *= 2;
+            float n = noise(nx, ny, z, state->seed);
+            if(n < 0)
+                n = 0;
+            if(n > 1)
+                n = 1;
+        }
+    }
+}
+
 void update_noise(float z)
 {
     for(int x = 0; x < state->width; x++) {
         for(int y = 0; y < state->height; y++) {
+            float zoomfactor = sqrtf(fabsf(state->zoom)) * fabsf(state->zoom);
             /* x, y coords */
-            float nx = x / (float)state->width;
-            float ny = y / (float)state->height;
+            float nx = x / (float)(state->width);
+            float ny = y / (float)(state->height);
             /* scale them */
-            nx *= 2, ny *= 2;
+            nx *= 2 * zoomfactor, ny *= 2 * zoomfactor;
+            nx += state->offx, ny += state->offy;
             /* main noise */
             float n = noise(nx, ny, z, state->seed);
             /* limit */
@@ -253,7 +282,13 @@ void update_noise(float z)
 
             /* add land color to the image */
             const uint8_t land[3] = { 0, 254, 48 };
-            mix(rc, gc, bc, land[0], land[1], land[2], g, &rc, &gc, &bc);
+            const uint8_t desert[3] = { 230, 211, 126 };
+            float landcol[3] = { 0, 254, 48 };
+            float desertv = desertnoise(nx, ny, z, state->seed + 12345);
+            mix(landcol[0], landcol[1], landcol[2], desert[0], desert[1],
+                desert[2], desertv, &landcol[0], &landcol[1], &landcol[2]);
+            mix(rc, gc, bc, landcol[0], landcol[1], landcol[2], g, &rc, &gc,
+                &bc);
 
             // gc = (imountain * mountainc[1]) + ((1 - imountain) * gc);
             // bc = (imountain * mountainc[2]) + ((1 - imountain) * bc);
@@ -322,9 +357,37 @@ int frame(void)
     static float t = 0;
     static float d = 1;
     static int recording = 0;
+    static int moving = 0;
+    static int didsmth = 0;
     static FFMPEG *ffmpeg = NULL;
     while(SDL_PollEvent(&ev)) {
         switch(ev.type) {
+        case SDL_MOUSEBUTTONDOWN: {
+            moving = 1;
+            break;
+        }
+        case SDL_MOUSEBUTTONUP: {
+            moving = 0;
+            break;
+        }
+        case SDL_MOUSEWHEEL: {
+            SDL_MouseWheelEvent mev = ev.wheel;
+            float s = mev.preciseY / 60;
+            state->zoom -= s;
+            if(state->zoom <= 0.00001)
+                state->zoom = 0.00001;
+            didsmth = 1;
+            break;
+        }
+        case SDL_MOUSEMOTION: {
+            SDL_MouseMotionEvent mev = ev.motion;
+            if(moving) {
+                state->offx -= (mev.xrel / (float)state->width) * state->zoom;
+                state->offy -= (mev.yrel / (float)state->height) * state->zoom;
+                didsmth = 1;
+            }
+            break;
+        }
         case SDL_QUIT:
             state->quit = true;
             return EXIT_FAILURE;
@@ -396,12 +459,16 @@ int frame(void)
         space:  save
     */
     if(!dont) {
+        didsmth = 0;
         t += (d * 1.) / 60.;
         update_noise(t);
         if(recording) {
             ffmpeg_send_frame(ffmpeg, state->pixels, WIDTH, HEIGHT);
         }
     }
+    if(didsmth)
+        update_noise(t);
+    didsmth = 0;
 
     return EXIT_SUCCESS;
 }
