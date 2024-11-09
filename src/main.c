@@ -30,7 +30,7 @@ uint32_t stpx_rgb(int x, int y, uint8_t r, uint8_t g, uint8_t b)
         };
     } c;
     c.a = 255;
-    c.r = r;
+    c.r = r;
     c.g = g;
     c.b = b;
     return stpx(x, y, c.raw);
