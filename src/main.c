@@ -11,6 +11,8 @@
 #include "ffmpeg.h"
 
 state_t *state = NULL;
+//#define WIDTH 304
+//#define HEIGHT 228
 #define WIDTH 400
 #define HEIGHT 300
 
@@ -461,10 +463,12 @@ void sim(float avgd)
         /*       if(r_ > 1000)
             r = 2;
 */
-        point1x += 0.00005 * r * randf();
-        point2x += 0.00005 * r * randf();
-        point1y += 0.00005 * r * randf();
-        point2y += 0.00005 * r * randf();
+        point1x += 0.0001 * r * randf();
+        point2x += 0.0001 * r * randf();
+        point1y += 0.0001 * r * randf();
+        point2y += 0.0001 * r * randf();
+
+        d = dis(point1x, point1y, point2x, point2y);
 
         point1x = fmodf(point1x, 1.0);
         point1y = fmodf(point1y, 1.0);
@@ -499,6 +503,68 @@ void sim(float avgd)
         state->points[i].y = point1y;
         state->points[nxt].y = point2y;
     }
+    for(size_t t = 0; t < state->points_amount; t++) {
+        float point1x = state->points[t].x;
+        float point1y = state->points[t].y;
+        for(size_t i = 0; i < state->points_amount; i++) {
+            float point2x = state->points[i].x;
+
+            float point2y = state->points[i].y;
+
+            float d = dis(point1x, point1y, point2x, point2y);
+
+            const float M = dis(0, 0, 1. / WIDTH, 1. / HEIGHT);
+
+            if(d < M) {
+                float di = d - M;
+                float s = di / 2;
+                float mx = (point1x + point2x) / 2;
+                float my = (point1y + point2y) / 2;
+                float dx = fabsf(point1x - mx);
+                float dy = fabsf(point1y - my);
+                point1x += dx;
+                point2x -= dx;
+                point1y += dy;
+                point2y -= dy;
+            }
+
+            point1x = fmodf(point1x, 1.0);
+            point1y = fmodf(point1y, 1.0);
+            if(point1x > 1.0) {
+                point1x -= 1.0;
+            }
+            if(point1x < 0.0) {
+                point1x += 1.0;
+            }
+            if(point1y > 1.0) {
+                point1y -= 1.0;
+            }
+            if(point1y < 0.0) {
+                point1y += 1.0;
+            }
+            point2x = fmodf(point2x, 1.0);
+            point2y = fmodf(point2y, 1.0);
+            if(point2x > 1.0) {
+                point2x -= 1.0;
+            }
+            if(point2x < 0.0) {
+                point2x += 1.0;
+            }
+            if(point2y > 1.0) {
+                point2y -= 1.0;
+            }
+            if(point2y < 0.0) {
+                point2y += 1.0;
+            }
+
+            state->points[i].x = point2x;
+            state->points[i].y = point2y;
+        }
+
+        state->points[t].x = point1x;
+        state->points[t].y = point1y;
+    }
+
     for(int x = 0; x < WIDTH; x++) {
         for(int y = 0; y < HEIGHT; y++) {
             int x0 = x;
@@ -572,16 +638,28 @@ int frame(void)
     SDL_Event ev;
     state->current = false;
 
-    static int dont = 1;
+    static int dont = 0;
     static float t = 0;
     static float d = 0;
-    static int recording = 0;
+    static int recording = 1;
     static int moving = 0;
     static int didsmth = 0;
     static int mode = 0;
+    static int frames = 0;
+    static int ffmpeg_inited = 0;
     static FFMPEG *ffmpeg = NULL;
 
     d = 0;
+    if(!ffmpeg_inited) {
+        ffmpeg_inited++;
+        ffmpeg = ffmpeg_start_rendering(WIDTH, HEIGHT, 24);
+    }
+    if(frames > 1440) {
+        ffmpeg_end_rendering(ffmpeg);
+        ffmpeg = NULL;
+        state->quit = 1;
+        return EXIT_FAILURE;
+    }
 
     while(SDL_PollEvent(&ev)) {
         switch(ev.type) {
@@ -688,6 +766,13 @@ int frame(void)
         if(recording)
             ffmpeg_send_frame(ffmpeg, state->pixels, WIDTH, HEIGHT);
     }
+    static float prevprog = 0;
+    float prog = (frames / 1440.0) * 100;
+    if(roundf(prevprog) != roundf(prog)) {
+        printf("Frame %d completed (%d complete)\n", frames, (int)roundf(prog));
+        prevprog = prog;
+    }
+    frames++;
 
     /* controls:
         q:       run
@@ -728,7 +813,7 @@ int main(int argc, char *argv[])
     float now = SDL_GetMS();
     float last_frame = -1.0f;
     while(!state->quit) {
-        if(now - last_frame > 1. / 60.) {
+        if(now - last_frame > 1. / 120.) {
             last_frame = now;
             if(frame()) {
                 fprintf(stderr, "ERROR: Failed to frame\n");
