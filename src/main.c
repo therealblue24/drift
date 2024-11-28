@@ -11,14 +11,60 @@
 #include "ffmpeg.h"
 
 state_t *state = NULL;
-
 #define WIDTH 400
 #define HEIGHT 300
 
-uint32_t stpx(int x, int y, uint32_t col)
+float randf(void)
 {
+    float r = rand() / (float)RAND_MAX;
+    r -= 0.5;
+    r *= 2;
+    return r;
+}
+
+int ssx(float x)
+{
+    float l = x * WIDTH;
+    if(l < 0)
+        l = 0;
+    if(l > WIDTH)
+        l = WIDTH;
+    l = floorf(l);
+    return (int)l;
+}
+
+int ssy(float y)
+{
+    float l = y * HEIGHT;
+    if(l < 0)
+        l = 0;
+    if(l > HEIGHT)
+        l = HEIGHT;
+    l = floorf(l);
+    return (int)l;
+}
+
+uint32_t stpx(int _x, int _y, uint32_t col)
+{
+    int x = _x;
+    int y = _y;
+    if(x < 0)
+        x = 0;
+    if(y < 0)
+        y = 0;
+    if(x >= state->width)
+        x = (state->width) - 1;
+    if(y >= state->height)
+        y = (state->height) - 1;
     state->pixels[x + y * state->width] = col;
     return state->pixels[x + y * state->width];
+}
+
+float dis(float x0, float y0, float x1, float y1)
+{
+    float x = x0 - x1;
+    float y = y0 - y1;
+    return sqrtf((x * x) + (y * y));
 }
 
 uint32_t stpx_rgb(int x, int y, uint8_t r, uint8_t g, uint8_t b)
@@ -36,6 +82,25 @@ uint32_t stpx_rgb(int x, int y, uint8_t r, uint8_t g, uint8_t b)
     return stpx(x, y, c.raw);
 }
 
+/* mix 2 colors */
+static inline void mix(float a1, float b1, float c1, float a2, float b2,
+                       float c2, float t, float *r, float *g, float *b)
+{
+    *r = ((1 - t) * a1) + t * a2;
+    *g = ((1 - t) * b1) + t * b2;
+    *b = ((1 - t) * c1) + t * c2;
+}
+
+void pointdraw(int x, int y, int rad, uint8_t r, uint8_t g, uint8_t b)
+{
+    for(int _x = -rad; _x <= rad; _x++) {
+        for(int _y = -rad; _y <= rad; _y++) {
+            stpx_rgb(x + _x, y + _y, r, g, b);
+        }
+    }
+    stpx_rgb(x, y, r, g, b);
+}
+
 void preinit(void)
 {
     state = calloc(1, sizeof(state_t));
@@ -47,11 +112,14 @@ void preinit(void)
     state->prev = 0;
     state->zoom = 1;
     state->offx = state->offy = 0;
+    state->points_amount = 0;
     state->current = 0;
 
     state->stride = state->width * 4;
     state->pixels = calloc(state->height, state->stride);
     ASSERT(state->pixels, "failed to allocate pixels!");
+    state->points = calloc(state->height * sizeof(point_t), state->width);
+    ASSERT(state->points, "failed to allocate points!");
 }
 
 void setres(size_t w, size_t h)
@@ -193,15 +261,6 @@ static inline float desertnoise(float x, float y, float z, int se)
     return ss2((n0 + 1) / 2, 0.6125);
 }
 
-/* mix 2 colors */
-static inline void mix(float a1, float b1, float c1, float a2, float b2,
-                       float c2, float t, float *r, float *g, float *b)
-{
-    *r = ((1 - t) * a1) + t * a2;
-    *g = ((1 - t) * b1) + t * b2;
-    *b = ((1 - t) * c1) + t * c2;
-}
-
 void update_raw(float z)
 {
     for(int x = 0; x < state->width; x++) {
@@ -229,142 +288,283 @@ float fclamp(float v, float l, float h)
 
 void update_noise(float z, int mode)
 {
+    state->points_amount = 0;
     for(int x = 0; x < state->width; x++) {
         for(int y = 0; y < state->height; y++) {
             float zoomfactor = sqrtf(fabsf(state->zoom)) * fabsf(state->zoom);
             /* x, y coords */
-            float nx = x / (float)(state->width);
-            float ny = y / (float)(state->height);
+            float _nx = x / (float)(state->width);
+            float _ny = y / (float)(state->height);
+            float nx = _nx;
+            float ny = _ny;
             /* scale them */
             nx *= 2 * zoomfactor, ny *= 2 * zoomfactor;
             nx += state->offx, ny += state->offy;
             /* main noise */
             float n = noise(nx, ny, z, state->seed);
+            float island = ss2(n, 0.4);
+            island = ss(island * island, 1.05);
             /* limit */
             if(n < 0)
                 n = 0;
             if(n > 1)
                 n = 1;
-            /* g = land
-             * w = water
-             * m = mismatch factor
-             */
-            if(!mode) {
-                float g = ss2(n, 0.7); // make land peak above 0.7
-                float w =
-                    ss2(1 - n, 0.7); // make water peak above 0.7 for (1-n)
-                float rg = fclamp(n - 0.35, 0, 1);
-                float rw = fclamp((1 - n) - 0.35, 0, 1);
-                float rm = rg + rw;
-                //rg /= rm;
-                //rw /= rm;
-                float m = g + w;
-                g /= m; // fix land and water ratios
-                w /= m;
-
-                const uint8_t sea[3] = { 20, 245, 207 };
-                const uint8_t mountainc[3] = { 80, 115, 89 };
-                const uint8_t water_col[3] = { 5, 97, 245 };
-                //const uint8_t watercol2[3] = { 13, 180, 222 };
-                const uint8_t watercol2[3] = { 21, 24, 176 };
-                /* calculate mountain noise, water color noise, snow noise */
-                float rmt = mountain(nx, ny, z, state->seed);
-                float watercolv = watercol(nx, ny, z, state->seed + 21);
-                float snowv = snow(nx, ny, z, state->seed + 1);
-                /* make mountain noise peak at 0.35 and above, multiply by land factor */
-                float imountain = g * ss2(rmt, 0.35);
-
-                /* gc = green color, bc = blue color, rc = red color */
-                float gc = 0;
-                float bc = 0;
-                // float rc = (mountainc[0] * imountain);
-                float rc = 0;
-                /* wr = water red, wg = water green, wb = water blue */
-                float wr = 0, wg = 0, wb = 0;
-                float wd = waterdepth(nx, ny, z, state->seed + 41) *
-                           0.9; /* water depth */
-                wd = ((0.25 * wd) + (0.75 * rw));
-
-                /* mix water colors based on water noise */
-                mix(wr, wg, wb, water_col[0], water_col[1], water_col[2],
-                    w * watercolv, &wr, &wg, &wb);
-                mix(wr, wg, wb, watercol2[0], watercol2[1], watercol2[2],
-                    w * (1 - watercolv), &wr, &wg, &wb);
-                wr *= 1 - (wd * wd);
-                wg *= 1 - (wd * wd);
-                wb *= 1 - (wd * wd);
-                /* add water color to the image */
-                mix(rc, gc, bc, wr, wg, wb, w, &rc, &gc, &bc);
-
-                /* add land color to the image */
-                const uint8_t land[3] = { 0, 254, 48 };
-                const uint8_t desert[3] = { 230, 211, 126 };
-                float landcol[3] = { 0, 254, 48 };
-                float desertv = desertnoise(nx, ny, z, state->seed + 12345);
-                mix(landcol[0], landcol[1], landcol[2], desert[0], desert[1],
-                    desert[2], desertv, &landcol[0], &landcol[1], &landcol[2]);
-                mix(rc, gc, bc, landcol[0], landcol[1], landcol[2], g, &rc, &gc,
-                    &bc);
-
-                // gc = (imountain * mountainc[1]) + ((1 - imountain) * gc);
-                // bc = (imountain * mountainc[2]) + ((1 - imountain) * bc);
-
-                /* add mountain color to the image */
-                mix(rc, gc, bc, mountainc[0], mountainc[1], mountainc[2],
-                    imountain, &rc, &gc, &bc);
-                /* add snow color to the image */
-                mix(rc, gc, bc, 255, 255, 255, snowv * g, &rc, &gc, &bc);
-                /* calculate sea/shoreline factor */
-                float s = 1 - (ss2(g * m, 0.5) +
-                               ss2(w * m, 0.5)); /* calculate sea amount */
-
-                /* mix sea/shoreline color to image */
-                mix(rc, gc, bc, sea[0], sea[1], sea[2], s * 0.5, &rc, &gc, &bc);
-
-                /*
-            float s = 1 - (m);
-            float as = (m);
-
-            rc = (as * rc) + (s * sea[0]);
-            gc = (as * gc) + (s * sea[1]);
-            bc = (as * bc) + (s * sea[2]);
-            */
-                /* upload to image */
-                stpx_rgb(x, y, rc, gc, bc);
-            } else {
-                stpx_rgb(x, y, n * 255, n * 255, n * 255);
-            }
             /*
-            n *= 100;
-            uint8_t rc = 0;
-            uint8_t gc = 0;
-            uint8_t bc = 0;
-            const uint8_t mountainc[3] = { 80, 115, 89 };
-            float imountain =
-                (n > 50) * ss2(mountain(nx, ny, z, state->seed), 0.35);
+            n = ss2(n, 0.7);
+            int b = (n > 0.5) * 255;
+            stpx_rgb(x, y, b, b, b);
+            */
+
+            n *= 75;
+            n += (island * 25);
+
+            uint8_t rc = 0, gc = 0, bc = 0;
             if(n > 50) {
                 rc = 0;
-                gc = n + 155;
+                gc = n + 154;
+                state->points[state->points_amount].x = _nx;
+                state->points[state->points_amount].y = _ny;
+                state->points_amount++;
                 bc = 0;
             } else {
                 rc = 0;
                 gc = 0;
-                bc = n + 155;
+                bc = n + 154;
             }
 
-            rc = (1 - imountain) * rc + imountain * mountainc[0];
-            gc = (1 - imountain) * gc + imountain * mountainc[1];
-            bc = (1 - imountain) * bc + imountain * mountainc[2];
             stpx_rgb(x, y, rc, gc, bc);
-            */
+        }
+    }
+}
+
+int voronoi(int _x, int _y)
+{
+    int x = _x % WIDTH;
+    int y = _y % HEIGHT;
+    float fx = x / (float)WIDTH;
+    float fy = y / (float)HEIGHT;
+    int n = 0;
+    for(int i = 0; i < PLATES; i++) {
+        if(dis(fx, fy, state->plates[i].x, state->plates[i].y) <
+           dis(fx, fy, state->plates[n].x, state->plates[n].y))
+            n = i;
+    }
+    return n;
+}
+
+void sim(float avgd)
+{
+    memset(state->pixels, 0, state->width * state->height * 4);
+    for(int x = 0; x < WIDTH; x++) {
+        for(int y = 0; y < HEIGHT; y++) {
+            stpx_rgb(x, y, 0, 0, 255);
+        }
+    }
+    for(size_t i = 0; i < state->points_amount; i++) {
+        int farest = 0;
+        int nearest = 0;
+        float pointx = state->points[i].x;
+        float pointy = state->points[i].y;
+        float velx = 0;
+        float vely = 0;
+        for(int j = 0; j < PLATES; j++) {
+            float cd =
+                dis(pointx, pointy, state->plates[j].x, state->plates[j].y);
+            if(cd > dis(pointx, pointy, state->plates[farest].x,
+                        state->plates[farest].y)) {
+                farest = j;
+            }
+            if(cd < dis(pointx, pointy, state->plates[nearest].x,
+                        state->plates[nearest].y)) {
+                nearest = j;
+            }
+        }
+        const float fd = dis(pointx, pointy, state->plates[farest].x,
+                             state->plates[farest].y);
+        for(int j = 0; j < PLATES; j++) {
+            const float F = (0.75 / (float)PLATES);
+            float d =
+                dis(pointx, pointy, state->plates[j].x, state->plates[j].y);
+            if(j == nearest) {
+                velx += 0.05 * state->vel[j].x;
+                vely += 0.05 * state->vel[j].y;
+            } else {
+                if(d != fd) {
+                    d /= fd;
+                    d *= d;
+                    d *= F;
+                    velx += (d * state->vel[j].x);
+                    vely += (d * state->vel[j].y);
+                } else {
+                    velx += (F * F * state->vel[j].x);
+                    vely += (F * F * state->vel[j].y);
+                }
+            }
+        }
+        pointx += velx;
+        pointy += vely;
+        pointx = fmodf(pointx, 1.0);
+        pointy = fmodf(pointy, 1.0);
+        if(pointx > 1.0) {
+            pointx -= 1.0;
+        }
+        if(pointx < 0.0) {
+            pointx += 1.0;
+        }
+        if(pointy > 1.0) {
+            pointy -= 1.0;
+        }
+        if(pointy < 0.0) {
+            pointy += 1.0;
+        }
+        state->points[i].x = pointx;
+        state->points[i].y = pointy;
+        int px = ssx(pointx);
+        int py = ssy(pointy);
+        pointdraw(px, py, 1, 0, 255, 0);
+    }
+    for(int i = 0; i < PLATES; i++) {
+        state->plates[i].x += 0.07 * state->vel[i].x;
+        state->plates[i].y += 0.07 * state->vel[i].y;
+        state->plates[i].x = fmodf(state->plates[i].x, 1.0);
+        state->plates[i].y = fmodf(state->plates[i].y, 1.0);
+        state->vel[i].x += randf() / (5000 / ((49 * state->vel[i].x)) + 1);
+        state->vel[i].y += randf() / (5000 / ((49 * state->vel[i].y)) + 1);
+
+        pointdraw(ssx(state->plates[i].x), ssy(state->plates[i].y), 4, 255, 255,
+                  255);
+    }
+
+    float avgc = 0;
+    for(size_t i = 0; i < state->points_amount; i++) {
+        size_t nxt = (i - 1) % state->points_amount;
+        float p1x = state->points[i].x;
+        float p1y = state->points[i].y;
+        float p2x = state->points[nxt].x;
+        float p2y = state->points[nxt].y;
+        float d = dis(p1x, p1y, p2x, p2y);
+        avgc += (d / (float)state->points_amount);
+    }
+
+    float repel = 1 / (avgc / avgd);
+
+    for(size_t i = 0; i < state->points_amount; i++) {
+        size_t nxt = (i - 1) % state->points_amount;
+        float point1x = state->points[i].x;
+        float point2x = state->points[nxt].x;
+        float point1y = state->points[i].y;
+        float point2y = state->points[nxt].y;
+
+        float d = dis(point1x, point1y, point2x, point2y);
+        float r = (avgd / avgc) * (1 / (d + 0.00001));
+
+        /*       if(r_ > 1000)
+            r = 2;
+*/
+        point1x += 0.00005 * r * randf();
+        point2x += 0.00005 * r * randf();
+        point1y += 0.00005 * r * randf();
+        point2y += 0.00005 * r * randf();
+
+        point1x = fmodf(point1x, 1.0);
+        point1y = fmodf(point1y, 1.0);
+        if(point1x > 1.0) {
+            point1x -= 1.0;
+        }
+        if(point1x < 0.0) {
+            point1x += 1.0;
+        }
+        if(point1y > 1.0) {
+            point1y -= 1.0;
+        }
+        if(point1y < 0.0) {
+            point1y += 1.0;
+        }
+        point2x = fmodf(point2x, 1.0);
+        point2y = fmodf(point2y, 1.0);
+        if(point2x > 1.0) {
+            point2x -= 1.0;
+        }
+        if(point2x < 0.0) {
+            point2x += 1.0;
+        }
+        if(point2y > 1.0) {
+            point2y -= 1.0;
+        }
+        if(point2y < 0.0) {
+            point2y += 1.0;
+        }
+        state->points[i].x = point1x;
+        state->points[nxt].x = point2x;
+        state->points[i].y = point1y;
+        state->points[nxt].y = point2y;
+    }
+    for(int x = 0; x < WIDTH; x++) {
+        for(int y = 0; y < HEIGHT; y++) {
+            int x0 = x;
+            int y0 = y + 1;
+            int x1 = x;
+            int y1 = y - 1;
+            int x2 = x - 1;
+            int y2 = y;
+            int x3 = x + 1;
+            int y3 = y;
+            int x4 = x;
+            int y4 = y;
+            int v0 = voronoi(x0, y0);
+            int v1 = voronoi(x1, y1);
+            int v2 = voronoi(x2, y2);
+            int v3 = voronoi(x3, y3);
+            int v4 = voronoi(x4, y4);
+            int f = 0;
+            if(v1 != v4)
+                f++;
+            if(v2 != v4)
+                f++;
+            if(v3 != v4)
+                f++;
+            if(v0 != v4)
+                f++;
+            if(f)
+                stpx_rgb(x, y, 255, 0, 0);
         }
     }
 }
 
 void init(void)
 {
+    for(int i = 0; i < PLATES; i++) {
+        int rand1 = rand();
+        int rand2 = rand();
+        float r1 = (rand1) / (float)RAND_MAX;
+        float r2 = (rand2) / (float)RAND_MAX;
+        state->plates[i].x = r1;
+        state->plates[i].y = r2;
+    }
+    for(int i = 0; i < PLATES; i++) {
+        state->vel[i].x = randf() / 100;
+        state->vel[i].y = randf() / 100;
+    }
     state->seed = rand();
     update_noise(0.0, 0); /* init noise at t=0 */
+    for(int i = 0; i < PLATES; i++) {
+        stpx_rgb(ssx(state->plates[i].x), ssy(state->plates[i].y), 255, 255,
+                 255);
+    }
+
+    float avgd = 0;
+    for(size_t i = 0; i < state->points_amount; i++) {
+        size_t nxt = (i - 1) % state->points_amount;
+        float p1x = state->points[i].x;
+        float p1y = state->points[i].y;
+        float p2x = state->points[nxt].x;
+        float p2y = state->points[nxt].y;
+        float d = dis(p1x, p1y, p2x, p2y);
+        avgd += (d / (float)state->points_amount);
+    }
+    state->avgd = avgd;
+
+    sim(avgd);
 }
 
 int frame(void)
@@ -374,14 +574,18 @@ int frame(void)
 
     static int dont = 1;
     static float t = 0;
-    static float d = 1;
+    static float d = 0;
     static int recording = 0;
     static int moving = 0;
     static int didsmth = 0;
     static int mode = 0;
     static FFMPEG *ffmpeg = NULL;
+
+    d = 0;
+
     while(SDL_PollEvent(&ev)) {
         switch(ev.type) {
+            /*
         case SDL_MOUSEBUTTONDOWN: {
             moving = 1;
             break;
@@ -408,21 +612,22 @@ int frame(void)
             }
             break;
         }
+        */
         case SDL_QUIT:
             state->quit = true;
             return EXIT_FAILURE;
             break;
-        case SDL_KEYUP:
+        case SDL_KEYUP: /*
             if(ev.key.keysym.sym == SDLK_1) {
                 mode = 1;
                 didsmth = 1;
             } else if(ev.key.keysym.sym == SDLK_2) {
                 mode = 0;
                 didsmth = 1;
-            }
+            }*/
             if(ev.key.keysym.sym == SDLK_p) {
                 if(!recording) {
-                    ffmpeg = ffmpeg_start_rendering(WIDTH, HEIGHT, 12);
+                    ffmpeg = ffmpeg_start_rendering(WIDTH, HEIGHT, 24);
                     recording = 1;
                     printf("Starting to record!\n");
                 } else {
@@ -434,9 +639,10 @@ int frame(void)
             }
             if(ev.key.keysym.sym == SDLK_e) {
                 d = 1;
+            } /*
             } else if(ev.key.keysym.sym == SDLK_r) {
                 d = -1;
-            }
+            }*/
             if(ev.key.keysym.sym == SDLK_x) {
                 state->quit = true;
                 return EXIT_FAILURE;
@@ -477,6 +683,12 @@ int frame(void)
         }
     }
 
+    if(!dont) {
+        sim(state->avgd);
+        if(recording)
+            ffmpeg_send_frame(ffmpeg, state->pixels, WIDTH, HEIGHT);
+    }
+
     /* controls:
         q:       run
         w:     pause
@@ -485,6 +697,7 @@ int frame(void)
         p:    record
         space:  save
     */
+    /*
     if(!dont) {
         didsmth = 0;
         t += (d * 1.) / 60.;
@@ -496,6 +709,8 @@ int frame(void)
     if(didsmth)
         update_noise(t, mode);
     didsmth = 0;
+
+    */
 
     return EXIT_SUCCESS;
 }
